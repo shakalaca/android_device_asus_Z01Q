@@ -1,0 +1,203 @@
+diff --git a/crypto/vold_decrypt/Android.mk b/crypto/vold_decrypt/Android.mk
+index 19c2963..45f5ab6 100644
+--- a/crypto/vold_decrypt/Android.mk
++++ b/crypto/vold_decrypt/Android.mk
+@@ -97,6 +97,13 @@ ifeq ($(TW_INCLUDE_CRYPTO), true)
+             endif
+         endif
+ 
++        ifeq ($(AB_OTA_UPDATER),true)
++            LOCAL_CFLAGS += -DAB_OTA_UPDATER=1
++        endif
++        ifeq ($(TARGET_HW_DISK_ENCRYPT_NEW),true)
++            LOCAL_CFLAGS += -DCONFIG_HW_DISK_ENCRYPT_NEW
++        endif
++
+         LOCAL_SRC_FILES = vold_decrypt.cpp
+         LOCAL_SHARED_LIBRARIES := libcutils
+         include $(BUILD_STATIC_LIBRARY)
+diff --git a/crypto/vold_decrypt/vold_decrypt.cpp b/crypto/vold_decrypt/vold_decrypt.cpp
+index ded4e7b..67e41fb 100644
+--- a/crypto/vold_decrypt/vold_decrypt.cpp
++++ b/crypto/vold_decrypt/vold_decrypt.cpp
+@@ -424,6 +424,28 @@ void Restore_Recovery_Fstab(void) {
+ 	vrename("/etc/recovery-fstab-orig", "/etc/recovery.fstab");
+ }
+ 
++#ifdef AB_OTA_UPDATER
++bool Symlink_System_Folder(void) {
++	if (PartitionManager.Is_Mounted_By_Path("/system")) {
++		LOGINFO("system partition mounted, unmounting ...\n");
++		if (!PartitionManager.UnMount_By_Path("/system", true)) {
++			// PartitionManager failed to unmount /system, this should not happen,
++			// but in case it does, do a lazy unmount
++			LOGINFO("WARNING: system could not be unmounted normally!\n");
++			umount2("/system", MNT_DETACH);
++		}
++	}
++	LOGINFO("Symlinking system folder...\n");
++	vrename("/system", "/system-orig");
++	vsymlink("/system_root/system", "/system", true);
++	return true;
++}
++
++void Restore_System_Folder(void) {
++	unlink("/system");
++	vrename("/system-orig", "/system");
++}
++#endif
+ 
+ /* Additional Services Functions */
+ #ifdef TW_CRYPTO_SYSTEM_VOLD_SERVICES
+@@ -956,6 +978,22 @@ int Run_vdc(const string& Password) {
+ 	else
+ 		return VD_ERR_VDC_FAILED_TO_CONNECT;
+ 
++#ifdef CONFIG_HW_DISK_ENCRYPT_NEW
++
++	property_set("ro.crypto.type", "block");
++	Wait_For_Property("ro.crypto.type");
++
++	res = Exec_vdc_cryptfs("mountdefaultencrypted", "", &vdcResult);
++	if (res == VD_ERR_VOLD_OPERATION_TIMEDOUT)
++		return VD_ERR_VOLD_OPERATION_TIMEDOUT;
++	else if (res)
++		return VD_ERR_FORK_EXECL_ERROR;
++
++	LOGINFO("vdc cryptfs result (mountdefaultencrypted): %s\n", vdcResult.Output.c_str());
++
++	Wait_For_Property("vold.decrypt_done", 20000000); // 20 seconds
++
++#else
+ 
+ 	// Input password from GUI, or default password
+ 	res = Exec_vdc_cryptfs("checkpw", Password, &vdcResult);
+@@ -985,6 +1023,7 @@ int Run_vdc(const string& Password) {
+ 			return VD_ERR_VOLD_UNEXPECTED_RESPONSE;
+ 		*/
+ 	}
++#endif
+ 
+ 	// vdc's return value is dependant upon source origin, it will either
+ 	// return 0 or ResponseCode, so disregard and focus on decryption instead
+@@ -1007,6 +1046,9 @@ int Vold_Decrypt_Core(const string& Password) {
+ 	bool is_firmware_symlinked = false;
+ 	bool is_fstab_symlinked = false;
+ 	bool is_vold_running = false;
++#ifdef AB_OTA_UPDATER
++	bool is_system_symlinked = false;
++#endif
+ 
+ 	if (Password.empty()) {
+ 		LOGINFO("vold_decrypt: password is empty!\n");
+@@ -1014,9 +1056,17 @@ int Vold_Decrypt_Core(const string& Password) {
+ 	}
+ 
+ 	// Mount system and check for vold and vdc
++#ifdef AB_OTA_UPDATER
++	if (!PartitionManager.Mount_By_Path("/system_root", true)) {
++		return VD_ERR_UNABLE_TO_MOUNT_SYSTEM;
++	}
++        is_system_symlinked = Symlink_System_Folder();
++#else
+ 	if (!PartitionManager.Mount_By_Path("/system", true)) {
+ 		return VD_ERR_UNABLE_TO_MOUNT_SYSTEM;
+-	} else if (!TWFunc::Path_Exists("/system/bin/vold")) {
++	} else 
++#endif
++	if (!TWFunc::Path_Exists("/system/bin/vold")) {
+ 		LOGINFO("ERROR: /system/bin/vold not found, aborting.\n");
+ 		return VD_ERR_MISSING_VOLD;
+ 	} else if (!TWFunc::Path_Exists("/system/bin/vdc")) {
+@@ -1090,6 +1140,7 @@ int Vold_Decrypt_Core(const string& Password) {
+ 		res = VD_ERR_VOLD_FAILED_TO_START;
+ 	}
+ 
++
+ 	// Stop services needed for vold decrypt so /system can be unmounted
+ 	LOGINFO("Stopping services...\n");
+ 	Stop_Service("sys_vold");
+@@ -1101,13 +1152,23 @@ int Vold_Decrypt_Core(const string& Password) {
+ 			Stop_Service(Services[i].VOLD_Service_Name);
+ 	}
+ #endif
+-
+ 	if (is_firmware_symlinked)
+ 		Restore_Firmware_Folder();
+ 	if (is_vendor_symlinked)
+ 		Restore_Vendor_Folder();
+ 	if (is_fstab_symlinked)
+ 		Restore_Recovery_Fstab();
++#ifdef AB_OTA_UPDATER
++	if (is_system_symlinked)
++		Restore_System_Folder();
++
++	if (!PartitionManager.UnMount_By_Path("/system_root", true)) {
++		// PartitionManager failed to unmount /system, this should not happen,
++		// but in case it does, do a lazy unmount
++		LOGINFO("WARNING: system could not be unmounted normally!\n");
++		umount2("/system_root", MNT_DETACH);
++	}
++#else
+ 
+ 	if (!PartitionManager.UnMount_By_Path("/system", true)) {
+ 		// PartitionManager failed to unmount /system, this should not happen,
+@@ -1115,6 +1176,7 @@ int Vold_Decrypt_Core(const string& Password) {
+ 		LOGINFO("WARNING: system could not be unmounted normally!\n");
+ 		umount2("/system", MNT_DETACH);
+ 	}
++#endif
+ 
+ 	LOGINFO("Finished.\n");
+ 
+diff --git a/twrp-functions.cpp b/twrp-functions.cpp
+index 40205c9..9964ef8 100644
+--- a/twrp-functions.cpp
++++ b/twrp-functions.cpp
+@@ -809,6 +809,38 @@ string TWFunc::Get_Current_Date() {
+ }
+ 
+ string TWFunc::System_Property_Get(string Prop_Name) {
++#ifdef AB_OTA_UPDATER
++	bool mount_state = PartitionManager.Is_Mounted_By_Path("/system_root");
++	std::vector<string> buildprop;
++	string propvalue;
++	if (!PartitionManager.Mount_By_Path("/system_root", true))
++		return propvalue;
++	string prop_file = "/system_root/system/build.prop";
++	if (TWFunc::read_file(prop_file, buildprop) != 0) {
++		LOGINFO("Unable to open /system_root/system/build.prop for getting '%s'.\n", Prop_Name.c_str());
++		DataManager::SetValue(TW_BACKUP_NAME, Get_Current_Date());
++		if (!mount_state)
++			PartitionManager.UnMount_By_Path("/system_root", false);
++		return propvalue;
++	}
++	int line_count = buildprop.size();
++	int index;
++	size_t start_pos = 0, end_pos;
++	string propname;
++	for (index = 0; index < line_count; index++) {
++		end_pos = buildprop.at(index).find("=", start_pos);
++		propname = buildprop.at(index).substr(start_pos, end_pos);
++		if (propname == Prop_Name) {
++			propvalue = buildprop.at(index).substr(end_pos + 1, buildprop.at(index).size());
++			if (!mount_state)
++				PartitionManager.UnMount_By_Path("/system_root", false);
++			return propvalue;
++		}
++	}
++	if (!mount_state)
++		PartitionManager.UnMount_By_Path("/system_root", false);
++	return propvalue;
++#else
+ 	bool mount_state = PartitionManager.Is_Mounted_By_Path("/system");
+ 	std::vector<string> buildprop;
+ 	string propvalue;
+@@ -841,6 +873,7 @@ string TWFunc::System_Property_Get(string Prop_Name) {
+ 	if (!mount_state)
+ 		PartitionManager.UnMount_By_Path("/system", false);
+ 	return propvalue;
++#endif
+ }
+ 
+ void TWFunc::Auto_Generate_Backup_Name() {
