@@ -1,0 +1,19 @@
+# mount_point   fstype    device                                             flags
+/system         ext4      /dev/block/bootdevice/by-name/system               flags=slotselect
+/system_root    ext4      /dev/block/bootdevice/by-name/system               flags=slotselect;mounttodecrypt
+/system_image   emmc      /dev/block/bootdevice/by-name/system               flags=slotselect;flashimg=1
+/vendor         ext4      /dev/block/bootdevice/by-name/vendor               flags=slotselect;display="Vendor";mounttodecrypt;backup=1
+/vendor_image   emmc      /dev/block/bootdevice/by-name/vendor               flags=slotselect;flashimg=1
+/data           f2fs      /dev/block/bootdevice/by-name/userdata             flags=encryptable=/dev/block/sda21
+/boot           emmc      /dev/block/bootdevice/by-name/boot                 flags=slotselect;backup=1
+/misc           emmc      /dev/block/bootdevice/by-name/misc                 flags=display="Misc";wipeingui
+
+/asdf           ext4      /dev/block/bootdevice/by-name/asdf                 flags=display="ASDF";wipeingui
+/factory        ext4      /dev/block/bootdevice/by-name/factory              flags=display="Factory";backup=1
+/firmware       vfat      /dev/block/bootdevice/by-name/modem                flags=slotselect;display="Modem firmware"
+/persist        ext4      /dev/block/bootdevice/by-name/persist              flags=display="Persist";backup=1
+/asusfw         ext4      /dev/block/bootdevice/by-name/asusfw               flags=slotselect;display="ASUS firmware"
+/dsp            ext4      /dev/block/bootdevice/by-name/dsp                  flags=slotselect;display="DSP"
+/xrom           ext4      /dev/block/bootdevice/by-name/xrom                 flags=slotselect;display="ASUS XROM";backup=1
+
+/usb_otg        auto      /dev/block/sdh1         /dev/block/sdh             flags=display="USB OTG";storage;wipeingui;removable

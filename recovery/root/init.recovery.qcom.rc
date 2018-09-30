@@ -1,0 +1,11 @@
+on init
+    wait /dev/block/platform/soc/${ro.boot.bootdevice}
+    symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+
+    insmod /sbin/tntfs.ko
+    insmod /sbin/texfat.ko
+
+    start qcom-usb-sh
+
+on property:vold.decrypt=trigger_post_fs_data
+    setprop vold.decrypt_done 1
