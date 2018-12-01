@@ -17,7 +17,7 @@
 ifeq ($(TARGET_DEVICE),Z01Q)
 
 NEW_PLATFORM_VERSION := 8.1.0
-NEW_PLATFORM_SECURITY_PATCH := 2018-09-01
+NEW_PLATFORM_SECURITY_PATCH := 2018-10-01
 
 LOCAL_PATH := $(call my-dir)
 include $(call all-subdir-makefiles,$(LOCAL_PATH))
